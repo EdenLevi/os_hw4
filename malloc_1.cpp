@@ -5,7 +5,8 @@
 #include <cstdio>
 
 void* smalloc(size_t size) {
-
+    if(size == 0 || size > 108) return nullptr;
+    // sbrk here, if fails return nullptr
 }
 
 
