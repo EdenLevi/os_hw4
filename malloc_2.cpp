@@ -150,7 +150,7 @@ d. Do not free ‘oldp’ if srealloc() fails.*/
 /*On top of the memory allocation functions that you are defining, you are also required to define the
         following stats methods.*/
 size_t _num_free_blocks() {
-    size_t counter;
+    size_t counter = 0;
     auto head = &heap;
     while(head->next) {
         head = head->next;
@@ -161,7 +161,7 @@ size_t _num_free_blocks() {
 // Returns the number of allocated blocks in the heap that are currently free.
 
 size_t _num_free_bytes() {
-    size_t counter;
+    size_t counter = 0;
     auto head = &heap;
     while(head->next) {
         head = head->next;
@@ -174,7 +174,7 @@ size_t _num_free_bytes() {
         excluding the bytes used by the meta-data structs.*/
 
 size_t _num_allocated_blocks() {
-    size_t counter;
+    size_t counter = 0;
     auto head = &heap;
     while(head->next) {
         head = head->next;
@@ -185,7 +185,7 @@ size_t _num_allocated_blocks() {
 //● Returns the overall (free and used) number of allocated blocks in the heap.
 
 size_t _num_allocated_bytes() {
-    size_t counter;
+    size_t counter = 0;
     auto head = &heap;
     while(head->next) {
         head = head->next;
@@ -198,7 +198,7 @@ size_t _num_allocated_bytes() {
 the bytes used by the meta-data structs.*/
 
 size_t _num_meta_data_bytes() {
-    size_t counter;
+    size_t counter = 0;
     auto head = &heap;
     while(head->next) {
         head = head->next;
