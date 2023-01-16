@@ -2,7 +2,7 @@
 // Created by edenl on 16/01/2023.
 //
 
-#include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <unistd.h>
 

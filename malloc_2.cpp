@@ -2,10 +2,9 @@
 // Created by edenl on 16/01/2023.
 //
 
-#include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <unistd.h>
-#include <list>
 
 #define ERROR (void*)-1
 #define MAX pow(10, 8)
