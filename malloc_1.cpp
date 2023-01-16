@@ -7,13 +7,5 @@
 void* smalloc(size_t size) {
     if(size == 0 || size > 108) return nullptr;
     // sbrk here, if fails return nullptr
+    // if success, return a pointer to the first allocate byte within the allocated block
 }
-
-
-/*● Tries to allocate ‘size’ bytes.
-● Return value:
-i. Success –a pointer to the first allocated byte within the allocated block.
-ii. Failure –
-a. If ‘size’ is 0 returns NULL.
-b. If ‘size’ is more than 108, return NULL.
-c. If sbrk fails, return NULL. */
