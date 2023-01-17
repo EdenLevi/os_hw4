@@ -59,7 +59,10 @@ void *BestFit(size_t size) {
             cutMeta->prev = currentBest;
             cutMeta->next = currentBest->next;
 
-            currentBest->next->prev = cutMeta;
+            if(currentBest->next) {
+                checkCookie(currentBest->next);
+                currentBest->next->prev = cutMeta;
+            }
             currentBest->next = cutMeta;
 
             currentBest->size = size;
@@ -109,6 +112,8 @@ void *big_smalloc(size_t size) {
     block->prev = GetLastMap();
     block->prev->next = block;
     block->next = nullptr;
+
+    return (void *) ((char *) address + sizeof(MallocMetadata));
 }
 
 void *smalloc(size_t size) {
@@ -129,7 +134,7 @@ void *smalloc(size_t size) {
         // 2. We know it is not big enough. Why? Because address returned null!!
         if (sbrk(size - last->size) == ERROR) return nullptr;
         last->size = size;
-        smalloc(size); /// try again
+        return smalloc(size); /// try again
     }
 
     if ((result = sbrk(size + sizeof(MallocMetadata))) == ERROR) return nullptr;
