@@ -1,5 +1,5 @@
 //
-// Created by edenl on 16/01/2023.
+// Created by edenl on 17/01/2023.
 //
 
 #include <cstring>
@@ -8,6 +8,7 @@
 
 #define ERROR (void*)-1
 #define MAX pow(10, 8)
+#define BIG_CHUNGUS (128*1024)
 
 class MallocMetadata {
 public:
@@ -22,19 +23,43 @@ public:
 
 MallocMetadata heap;
 
-void *IsEnoughSpace(size_t size) {
+void *BestFit(size_t size) {
+    MallocMetadata* currentBest = nullptr;
+
     MallocMetadata *head = &heap;
     while (head->next) {
         head = head->next;
-        if (head->is_free && head->size >= size) {
-            // enough space :) :) :)
-            head->is_free = false;
-            ///head->size = size; /// i think this is bad
-            return ((char *) head + sizeof(MallocMetadata));
+        if (head->is_free && head->size >= size) { /// found one that fits
+            if(!currentBest) currentBest = head; /// nothing in hand
+            else if(head->size < currentBest->size) currentBest = head; /// found something better
         }
+    }
+    if(currentBest) {
+
+        if(currentBest->size >= size + sizeof(MallocMetadata) + 128) { // not *2 because size exclude it
+            auto cutMeta = (MallocMetadata*)((char*)currentBest + sizeof(MallocMetadata) + size);
+            cutMeta->is_free = true;
+            cutMeta->size = currentBest->size - sizeof(MallocMetadata) - size;
+
+            cutMeta->prev = currentBest;
+            cutMeta->next = currentBest->next;
+
+            currentBest->next->prev = cutMeta;
+            currentBest->next = cutMeta;
+
+            currentBest->size = size;
+
+        }
+
+        currentBest->is_free = false;
+        ///currentBest->size = size; /// i think this is bad
+        /// size should always hold the actual space allocated
+        return ((char *) currentBest + sizeof(MallocMetadata));
     }
     return nullptr;
 }
+
+/// block + metadata + metadata + 128 >=
 
 MallocMetadata *GetLast() {
     MallocMetadata *head = &heap;
@@ -45,17 +70,29 @@ MallocMetadata *GetLast() {
 }
 
 void *smalloc(size_t size) {
+
+    if(size >= BIG_CHUNGUS) {
+        // here magic will happen
+    }
+
     void *result;
     if (size == 0 || (double) size > MAX) return nullptr;
 
-    void *address = IsEnoughSpace(size);
+    MallocMetadata *last = GetLast();
+    void *address = BestFit(size);
     if (address) return address;
+    else if(last->is_free) {
+        // 1. We know the wilderness block is free
+        // 2. We know it is not big enough. Why? Because address returned null!!
+        if (sbrk(size - last->size) == ERROR) return nullptr;
+        last->size = size;
+        smalloc(size); /// try again
+    }
 
     if ((result = sbrk(size + sizeof(MallocMetadata))) == ERROR) return nullptr;
 
     // sbrk successful
     auto newBlock = (MallocMetadata *) result;
-    MallocMetadata *last = GetLast();
     last->next = newBlock;
 
     newBlock->next = nullptr;
@@ -109,6 +146,20 @@ void sfree(void *p) {
 
     if (block->is_free) return;
 
+    /// here block actually frees
+    if(block->prev->is_free || block->next->is_free) {
+        if(block->next->is_free) {
+            block->size += sizeof(MallocMetadata) + block->next->size;
+            block->next = block->next->next;
+            block->next->prev = block;
+        }
+        if(block->prev->is_free) {
+            block->prev->size += sizeof(MallocMetadata) + block->size;
+            block->prev->next = block->next;
+            block->next->prev = block->prev;
+            block = block->prev;
+        }
+    }
     block->is_free = true;
 }
 
