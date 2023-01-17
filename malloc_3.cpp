@@ -147,16 +147,16 @@ void sfree(void *p) {
     if (block->is_free) return;
 
     /// here block actually frees
-    if(block->prev->is_free || block->next->is_free) {
-        if(block->next->is_free) {
+    if((block->prev && block->prev->is_free) || (block->next && block->next->is_free)) {
+        if(block->next && block->next->is_free) {
             block->size += sizeof(MallocMetadata) + block->next->size;
             block->next = block->next->next;
-            block->next->prev = block;
+            if(block->next) block->next->prev = block;
         }
-        if(block->prev->is_free) {
+        if(block->prev && block->prev->is_free) {
             block->prev->size += sizeof(MallocMetadata) + block->size;
             block->prev->next = block->next;
-            block->next->prev = block->prev;
+            if(block->next) block->next->prev = block->prev;
             block = block->prev;
         }
     }
