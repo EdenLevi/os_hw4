@@ -107,7 +107,7 @@ void sfree(void *p) {
     MallocMetadata *block = (MallocMetadata *) ((char *) p - sizeof(MallocMetadata));
     // did we need to remove the size of meta data? they claim they give good pointers
 
-    if (!block->is_free) return;
+    if (block->is_free) return;
 
     block->is_free = true;
 }
@@ -118,6 +118,7 @@ void sfree(void *p) {
 
 
 void *srealloc(void *oldp, size_t size) {
+    if(!oldp) return smalloc(size);
     if (size == 0 || (double) size > MAX) return nullptr;
     MallocMetadata *oldBlock = (MallocMetadata *) ((char *) oldp - sizeof(MallocMetadata));
 
