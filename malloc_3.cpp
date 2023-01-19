@@ -59,12 +59,11 @@ void *BestFit(size_t size) {
             cutMeta->prev = currentBest;
             cutMeta->next = currentBest->next;
 
-            if(currentBest->next) {
+            if (currentBest->next) {
                 checkCookie(currentBest->next);
                 currentBest->next->prev = cutMeta;
             }
             currentBest->next = cutMeta;
-
             currentBest->size = size;
             currentBest->cookie = randomCookie;
 
@@ -112,7 +111,6 @@ void *big_smalloc(size_t size) {
     block->prev = GetLastMap();
     block->prev->next = block;
     block->next = nullptr;
-
     return (void *) ((char *) address + sizeof(MallocMetadata));
 }
 
@@ -253,14 +251,144 @@ void *srealloc(void *oldp, size_t size) {
     if (size == 0 || (double) size > MAX) return nullptr;
     MallocMetadata *oldBlock = (MallocMetadata *) ((char *) oldp - sizeof(MallocMetadata));
     checkCookie(oldBlock);
-    if (oldBlock->size >= size) return oldp;
+
+    // void *result = smalloc(size);
+    // if (!result) return nullptr;
+    if(size >= BIG_CHUNGUS) {
+        if (oldBlock->size >= size) {
+            return oldp;
+        }
+        void *result = smalloc(size);
+        if (!result) return nullptr;
+        return big_srealloc(oldp, oldBlock, result);
+    }
+
+    //case a
+    if (oldBlock->size >= size) {
+        oldBlock->is_free = true;
+        BestFit(size);
+        return oldp;
+    }
+
+    //case b
+    checkCookie(oldBlock->prev);
+    if(oldBlock->prev->is_free && (oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata) ) >= size) {
+        MallocMetadata* result = oldBlock->prev;
+        oldBlock->prev->is_free=false;
+        oldBlock->prev->next= oldBlock->next;
+        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
+        memmove((char*)oldBlock->prev+sizeof(MallocMetadata), oldp, oldBlock->size);
+
+        if(result->next) {
+            checkCookie(result->next);
+            result->next->prev = result;
+        }
+
+        result->is_free = true;
+        BestFit(size);
+        return ((char*)result + sizeof(MallocMetadata));
+    }
+
+    //case b *
+    if(oldBlock->prev->is_free && !oldBlock->next) { // old Block is wilderness
+        MallocMetadata* result = oldBlock->prev;
+        oldBlock->prev->is_free=false;
+        oldBlock->prev->next= oldBlock->next;
+        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
+        memmove(oldBlock->prev, oldp, oldBlock->size);
+
+        if (sbrk(size - result->size) == ERROR) return nullptr;
+        result->size = size;
+
+        result->is_free = true;
+        BestFit(size);
+        return ((char*)result + sizeof(MallocMetadata));
+    }
+
+    //case c
+    if(!oldBlock->next) {
+        if (sbrk(size - oldBlock->size) == ERROR) return nullptr;
+        oldBlock->size = size;
+
+        oldBlock->is_free = true;
+        BestFit(size);
+        return ((char*)oldBlock + sizeof(MallocMetadata));
+    }
+
+    //case d
+    checkCookie(oldBlock->next);
+    if(oldBlock->next && oldBlock->next->is_free &&
+       (oldBlock->size + oldBlock->next->size + sizeof(MallocMetadata)) >= size) {
+        oldBlock->next = oldBlock->next->next;
+        oldBlock->size += oldBlock->next->size + sizeof(MallocMetadata);
+
+        if(oldBlock->next->next) {
+            checkCookie(oldBlock->next->next);
+            oldBlock->next->next->prev = oldBlock;
+        }
+
+        oldBlock->is_free = true;
+        BestFit(size);
+        return ((char*)oldBlock + sizeof(MallocMetadata));
+    }
+
+    //case e
+    if(oldBlock->next && oldBlock->next->is_free &&
+       oldBlock->prev->is_free && (oldBlock->prev->size + sizeof(MallocMetadata)*2 + oldBlock->next->size + oldBlock->size) >= size) {
+        MallocMetadata* result = oldBlock->prev;
+        oldBlock->prev->is_free=false;
+        oldBlock->prev->next= oldBlock->next;
+        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
+        memmove(oldBlock->prev, oldp, oldBlock->size);
+
+        if(result->next) {
+            checkCookie(result->next);
+            result->next->prev = result;
+        }
+
+        result->next = result->next->next;
+        result->size += result->next->size + sizeof(MallocMetadata);
+
+        if(result->next->next) {
+            checkCookie(result->next->next);
+            result->next->next->prev = result;
+        }
+        result->is_free = true;
+        BestFit(size);
+        return ((char*)result + sizeof(MallocMetadata));
+    }
+
+    //case f(1)
+    if(oldBlock->next && !oldBlock->next->next && oldBlock->next->is_free &&
+       oldBlock->prev->is_free) {
+        MallocMetadata* result = oldBlock->prev;
+        size_t temp = oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata)*2 + oldBlock->next->size;
+        oldBlock->prev->is_free=false;
+        oldBlock->prev->next= oldBlock->next;
+        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
+        memmove(oldBlock->prev, oldp, oldBlock->size);
+
+        if (sbrk(size - temp) == ERROR) return nullptr;
+
+        result->size = size;
+        result->next = nullptr;
+
+        return ((char*)result + sizeof(MallocMetadata));
+    }
+
+    //case f(2)
+    if(oldBlock->next && !oldBlock->next->next && oldBlock->next->is_free) {
+        size_t temp = oldBlock->size + oldBlock->next->size + sizeof(MallocMetadata);
+        if (sbrk(size - temp) == ERROR) return nullptr;
+
+        oldBlock->size = size;
+        oldBlock->next = nullptr;
+
+        return ((char*)oldBlock + sizeof(MallocMetadata));
+    }
 
     void *result = smalloc(size);
     if (!result) return nullptr;
-
-    if(size >= BIG_CHUNGUS) {
-        return big_srealloc(oldp, oldBlock, result);
-    }
 
     memmove(result, oldp, oldBlock->size);
     sfree(oldp);
