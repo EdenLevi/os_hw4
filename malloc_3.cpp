@@ -6,10 +6,12 @@
 #include <cmath>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <iostream>
 
 #define ERROR (void*)-1
 #define MAX pow(10, 8)
 #define BIG_CHUNGUS (128*1024)
+#define MIN_SPLIT 128
 
 int randomCookie = rand();
 
@@ -25,8 +27,8 @@ public:
     MallocMetadata() : cookie(randomCookie), size(0), is_free(false), next(nullptr), prev(nullptr) {}
 };
 
-void checkCookie(MallocMetadata* block) {
-    if(block && block->cookie != randomCookie) {
+void checkCookie(MallocMetadata *block) {
+    if (block && block->cookie != randomCookie) {
         exit(0xdeadbeef);
     }
 }
@@ -35,8 +37,28 @@ MallocMetadata heap;
 MallocMetadata mapHeap;
 
 
+void combineFreebies() {
+    MallocMetadata *head = &heap;
+    while (head->next) {
+        checkCookie(head->next);
+        if (head->is_free && head->next->is_free) {
+            // found ya haha
+            head->size += head->next->size + sizeof(MallocMetadata);
+
+            if (head->next->next) {
+                checkCookie(head->next->next);
+                head->next->next->prev = head;
+            }
+            head->next = head->next->next;
+            break;
+        }
+        head = head->next;
+    }
+}
+
+
 void *BestFit(size_t size) {
-    MallocMetadata* currentBest = nullptr;
+    MallocMetadata *currentBest = nullptr;
 
     MallocMetadata *head = &heap;
     checkCookie(head);
@@ -44,14 +66,14 @@ void *BestFit(size_t size) {
         head = head->next;
         checkCookie(head);
         if (head->is_free && head->size >= size) { /// found one that fits
-            if(!currentBest) currentBest = head; /// nothing in hand
-            else if(head->size < currentBest->size) currentBest = head; /// found something better
+            if (!currentBest) currentBest = head; /// nothing in hand
+            else if (head->size < currentBest->size) currentBest = head; /// found something better
         }
     }
-    if(currentBest) {
+    if (currentBest) {
 
-        if(currentBest->size >= size + sizeof(MallocMetadata) + 128) { // not *2 because size exclude it
-            auto cutMeta = (MallocMetadata*)((char*)currentBest + sizeof(MallocMetadata) + size);
+        if (currentBest->size >= size + sizeof(MallocMetadata) + MIN_SPLIT) { // not *2 because size exclude it
+            auto cutMeta = (MallocMetadata *) ((char *) currentBest + sizeof(MallocMetadata) + size);
             cutMeta->is_free = true;
             cutMeta->size = currentBest->size - sizeof(MallocMetadata) - size;
             cutMeta->cookie = randomCookie;
@@ -72,6 +94,7 @@ void *BestFit(size_t size) {
         currentBest->is_free = false;
         ///currentBest->size = size; /// i think this is bad
         /// size should always hold the actual space allocated
+        combineFreebies();
         return ((char *) currentBest + sizeof(MallocMetadata));
     }
     return nullptr;
@@ -101,9 +124,10 @@ MallocMetadata *GetLastMap() {
 
 void *big_smalloc(size_t size) {
     //BIG ALLOCATION HAPPENS HERE
-    void* address = mmap(NULL, sizeof(MallocMetadata) + size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if(address == MAP_FAILED) return nullptr;
-    auto block = (MallocMetadata*)address;
+    void *address = mmap(NULL, sizeof(MallocMetadata) + size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1,
+                         0);
+    if (address == MAP_FAILED) return nullptr;
+    auto block = (MallocMetadata *) address;
 
     block->size = size;
     block->cookie = randomCookie;
@@ -119,7 +143,7 @@ void *smalloc(size_t size) {
     void *result;
     if (size == 0 || (double) size > MAX) return nullptr;
 
-    if(size >= BIG_CHUNGUS) {
+    if (size >= BIG_CHUNGUS) {
         // here magic will happen
         return big_smalloc(size);
     }
@@ -127,7 +151,7 @@ void *smalloc(size_t size) {
     MallocMetadata *last = GetLast();
     void *address = BestFit(size);
     if (address) return address;
-    else if(last->is_free) {
+    else if (last->is_free) {
         // 1. We know the wilderness block is free
         // 2. We know it is not big enough. Why? Because address returned null!!
         if (sbrk(size - last->size) == ERROR) return nullptr;
@@ -181,12 +205,12 @@ b. If ‘size * num’ is more than 108, return NULL.
 c. If sbrk fails in allocating the needed space, return NULL.*/
 
 
-void big_sfree(MallocMetadata* block) {
+void big_sfree(MallocMetadata *block) {
     /// pashut mumnap
     checkCookie(block);
     checkCookie(block->prev);
     block->prev->next = block->next;
-    if(block->next) {
+    if (block->next) {
         checkCookie(block->next);
         block->next->prev = block->prev;
     }
@@ -207,26 +231,26 @@ void sfree(void *p) {
     if (block->is_free) return;
 
     /// here block actually frees
-    if(block->size >= BIG_CHUNGUS) {
+    if (block->size >= BIG_CHUNGUS) {
         return big_sfree(block);
     }
 
     checkCookie(block->prev);
     checkCookie(block->next);
-    if((block->prev && block->prev->is_free) || (block->next && block->next->is_free)) {
-        if(block->next && block->next->is_free) {
+    if ((block->prev && block->prev->is_free) || (block->next && block->next->is_free)) {
+        if (block->next && block->next->is_free) {
             block->size += sizeof(MallocMetadata) + block->next->size;
             block->next = block->next->next;
-            if(block->next) {
+            if (block->next) {
                 checkCookie(block->next);
                 block->next->prev = block;
             }
         }
         checkCookie(block->prev);
-        if(block->prev && block->prev->is_free) {
+        if (block->prev && block->prev->is_free) {
             block->prev->size += sizeof(MallocMetadata) + block->size;
             block->prev->next = block->next;
-            if(block->next) {
+            if (block->next) {
                 checkCookie(block->next);
                 block->next->prev = block->prev;
             }
@@ -240,21 +264,20 @@ void sfree(void *p) {
 ● If ‘p’ is NULL or already released, simply returns.
 ● Presume that all pointers ‘p’ truly points to the beginning of an allocated block.*/
 
-void *big_srealloc(void* oldp, MallocMetadata *oldBlock, void* result) {
+void *big_srealloc(void *oldp, MallocMetadata *oldBlock, void *result) {
     memcpy(result, oldp, oldBlock->size);
     sfree(oldp);
     return result;
 }
 
 void *srealloc(void *oldp, size_t size) {
-    if(!oldp) return smalloc(size);
+
+    if (!oldp) return smalloc(size);
     if (size == 0 || (double) size > MAX) return nullptr;
     MallocMetadata *oldBlock = (MallocMetadata *) ((char *) oldp - sizeof(MallocMetadata));
     checkCookie(oldBlock);
 
-    // void *result = smalloc(size);
-    // if (!result) return nullptr;
-    if(size >= BIG_CHUNGUS) {
+    if (size >= BIG_CHUNGUS) {
         if (oldBlock->size >= size) {
             return oldp;
         }
@@ -272,126 +295,133 @@ void *srealloc(void *oldp, size_t size) {
 
     //case b
     checkCookie(oldBlock->prev);
-    if(oldBlock->prev->is_free && (oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata) ) >= size) {
-        MallocMetadata* result = oldBlock->prev;
-        oldBlock->prev->is_free=false;
-        oldBlock->prev->next= oldBlock->next;
-        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
-        memmove((char*)oldBlock->prev+sizeof(MallocMetadata), oldp, oldBlock->size);
+    if (oldBlock->prev->is_free && (oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata)) >= size) {
+        MallocMetadata *result = oldBlock->prev;
+        result->is_free = false;
+        result->next = oldBlock->next;
+        result->size = oldBlock->size + result->size + sizeof(MallocMetadata);
+        memmove((char *) result + sizeof(MallocMetadata), oldp, oldBlock->size);
 
-        if(result->next) {
+        if (result->next) {
             checkCookie(result->next);
             result->next->prev = result;
         }
 
         result->is_free = true;
         BestFit(size);
-        return ((char*)result + sizeof(MallocMetadata));
+        return ((char *) result + sizeof(MallocMetadata));
     }
 
     //case b *
-    if(oldBlock->prev->is_free && !oldBlock->next) { // old Block is wilderness
-        MallocMetadata* result = oldBlock->prev;
-        oldBlock->prev->is_free=false;
-        oldBlock->prev->next= oldBlock->next;
-        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
-        memmove(oldBlock->prev, oldp, oldBlock->size);
+    if (oldBlock->prev->is_free && !oldBlock->next) { // old Block is wilderness
+        MallocMetadata *result = oldBlock->prev;
+        result->is_free = false;
+        result->next = oldBlock->next;
+        result->size = oldBlock->size + result->size + sizeof(MallocMetadata);
+        memmove((char *) result + +sizeof(MallocMetadata), oldp, oldBlock->size);
 
         if (sbrk(size - result->size) == ERROR) return nullptr;
         result->size = size;
 
         result->is_free = true;
-        BestFit(size);
-        return ((char*)result + sizeof(MallocMetadata));
+        BestFit(size); // used to split
+        return ((char *) result + sizeof(MallocMetadata));
     }
 
     //case c
-    if(!oldBlock->next) {
+    if (!oldBlock->next) {
         if (sbrk(size - oldBlock->size) == ERROR) return nullptr;
         oldBlock->size = size;
 
         oldBlock->is_free = true;
-        BestFit(size);
-        return ((char*)oldBlock + sizeof(MallocMetadata));
+        BestFit(size); // used to split
+
+        return ((char *) oldBlock + sizeof(MallocMetadata));
     }
 
     //case d
     checkCookie(oldBlock->next);
-    if(oldBlock->next && oldBlock->next->is_free &&
-       (oldBlock->size + oldBlock->next->size + sizeof(MallocMetadata)) >= size) {
-        oldBlock->next = oldBlock->next->next;
+    if (oldBlock->next && oldBlock->next->is_free &&
+        (oldBlock->size + oldBlock->next->size + sizeof(MallocMetadata)) >= size) {
         oldBlock->size += oldBlock->next->size + sizeof(MallocMetadata);
+        oldBlock->next = oldBlock->next->next;
 
-        if(oldBlock->next->next) {
-            checkCookie(oldBlock->next->next);
-            oldBlock->next->next->prev = oldBlock;
+        if (oldBlock->next) {
+            checkCookie(oldBlock->next);
+            oldBlock->next->prev = oldBlock;
         }
 
         oldBlock->is_free = true;
         BestFit(size);
-        return ((char*)oldBlock + sizeof(MallocMetadata));
+
+        return ((char *) oldBlock + sizeof(MallocMetadata));
     }
 
-    //case e
-    if(oldBlock->next && oldBlock->next->is_free &&
-       oldBlock->prev->is_free && (oldBlock->prev->size + sizeof(MallocMetadata)*2 + oldBlock->next->size + oldBlock->size) >= size) {
-        MallocMetadata* result = oldBlock->prev;
-        oldBlock->prev->is_free=false;
-        oldBlock->prev->next= oldBlock->next;
-        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
-        memmove(oldBlock->prev, oldp, oldBlock->size);
+    //case e - three adjacent blocks
+    if (oldBlock->next && oldBlock->next->is_free && oldBlock->prev->is_free &&
+        (oldBlock->prev->size + sizeof(MallocMetadata) * 2 + oldBlock->next->size + oldBlock->size) >= size) {
+        MallocMetadata *result = oldBlock->prev;
 
-        if(result->next) {
+        /// add the one before me
+        result->is_free = false;
+        result->next = oldBlock->next;
+        result->size += oldBlock->size + sizeof(MallocMetadata);
+        memmove((char *) result + sizeof(MallocMetadata), oldp, oldBlock->size);
+
+        if (result->next) {
             checkCookie(result->next);
             result->next->prev = result;
         }
 
-        result->next = result->next->next;
+        /// add the one after me
         result->size += result->next->size + sizeof(MallocMetadata);
-
-        if(result->next->next) {
-            checkCookie(result->next->next);
-            result->next->next->prev = result;
+        result->next = result->next->next;
+        if (result->next) {
+            checkCookie(result->next);
+            result->next->prev = result;
         }
         result->is_free = true;
         BestFit(size);
-        return ((char*)result + sizeof(MallocMetadata));
+
+        return ((char *) result + sizeof(MallocMetadata));
     }
 
     //case f(1)
-    if(oldBlock->next && !oldBlock->next->next && oldBlock->next->is_free &&
-       oldBlock->prev->is_free) {
-        MallocMetadata* result = oldBlock->prev;
-        size_t temp = oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata)*2 + oldBlock->next->size;
-        oldBlock->prev->is_free=false;
-        oldBlock->prev->next= oldBlock->next;
-        oldBlock->prev->size= oldBlock->size + oldBlock->prev->size + sizeof(MallocMetadata);
-        memmove(oldBlock->prev, oldp, oldBlock->size);
+    if (oldBlock->next && !oldBlock->next->next && oldBlock->next->is_free &&
+        oldBlock->prev->is_free) {
+        MallocMetadata *result = oldBlock->prev;
+        size_t temp = oldBlock->size + result->size + sizeof(MallocMetadata) * 2 + oldBlock->next->size;
+        result->is_free = false;
+        result->next = oldBlock->next;
+        result->size = oldBlock->size + result->size + sizeof(MallocMetadata);
+        memmove((char *) result + sizeof(MallocMetadata), oldp, oldBlock->size);
 
         if (sbrk(size - temp) == ERROR) return nullptr;
 
         result->size = size;
         result->next = nullptr;
 
-        return ((char*)result + sizeof(MallocMetadata));
+        return ((char *) result + sizeof(MallocMetadata));
     }
 
     //case f(2)
-    if(oldBlock->next && !oldBlock->next->next && oldBlock->next->is_free) {
+    if (oldBlock->next && !oldBlock->next->next && oldBlock->next->is_free) {
         size_t temp = oldBlock->size + oldBlock->next->size + sizeof(MallocMetadata);
         if (sbrk(size - temp) == ERROR) return nullptr;
 
         oldBlock->size = size;
         oldBlock->next = nullptr;
 
-        return ((char*)oldBlock + sizeof(MallocMetadata));
+        return ((char *) oldBlock + sizeof(MallocMetadata));
     }
 
     void *result = smalloc(size);
-    if (!result) return nullptr;
 
-    memmove(result, oldp, oldBlock->size);
-    sfree(oldp);
+    if (!result) return nullptr;
+    if (result != oldp) {
+        memmove(result, oldp, oldBlock->size);
+        sfree(oldp);
+    }
 
     return result;
 }
@@ -416,10 +446,10 @@ size_t _num_free_blocks() {
     size_t counter = 0;
     auto head = &heap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
-        if(head->is_free) counter++;
+        if (head->is_free) counter++;
     }
     return counter;
 }
@@ -429,10 +459,10 @@ size_t _num_free_bytes() {
     size_t counter = 0;
     auto head = &heap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
-        if(head->is_free) counter += head->size;
+        if (head->is_free) counter += head->size;
     }
     return counter;
 }
@@ -444,14 +474,14 @@ size_t _num_allocated_blocks() {
     size_t counter = 0;
     auto head = &heap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
         counter++;
     }
     head = &mapHeap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
         counter++;
@@ -464,14 +494,14 @@ size_t _num_allocated_bytes() {
     size_t counter = 0;
     auto head = &heap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
         counter += head->size;
     }
     head = &mapHeap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
         counter += head->size;
@@ -486,19 +516,19 @@ size_t _num_meta_data_bytes() {
     size_t counter = 0;
     auto head = &heap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
         counter++;
     }
     head = &mapHeap;
     checkCookie(head);
-    while(head->next) {
+    while (head->next) {
         head = head->next;
         checkCookie(head);
         counter++;
     }
-    return counter*sizeof(MallocMetadata);
+    return counter * sizeof(MallocMetadata);
 }
 //● Returns the overall number of meta-data bytes currently in the heap.
 
